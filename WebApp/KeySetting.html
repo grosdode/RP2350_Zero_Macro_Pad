@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MacroPad Editor</title>
+<style>
+  :root {
+    --bg: #f4f5f9; --card: #ffffff; --text: #1b1e27; --muted: #6b7280;
+    --border: #e3e6ee; --accent: #5b6cff; --accent-soft: #eceeff;
+    --danger: #e5484d; --ok: #1f9d55; --warn: #b7791f; --key: #fbfbfd; --shadow: 0 4px 20px rgba(20,25,50,.07);
+    --wait-bg: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1117; --card: #181b24; --text: #eceef5; --muted: #8b93a7;
+      --border: #272b38; --accent: #7886ff; --accent-soft: #232846;
+      --danger: #ff6369; --ok: #4cc38a; --warn: #f0b429; --key: #1e222d; --shadow: 0 4px 24px rgba(0,0,0,.35);
+      --wait-bg: #2b3040;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap {
+    max-width: 860px; margin: 0 auto;
+    padding: 1.5rem 1rem 3rem;
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+  }
+  header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
+  h1 { font-size: 1.5rem; margin: 0; letter-spacing: -.02em; }
+  h1 span { color: var(--accent); }
+  .toolbar { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+
+  button {
+    font: inherit; font-weight: 500; padding: .5rem .95rem; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    touch-action: manipulation;
+    transition: background .15s, border-color .15s, transform .05s, opacity .15s;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+  button.ghost { background: transparent; border-color: transparent; color: var(--muted); padding: .4rem .6rem; }
+  button.ghost:hover { color: var(--text); border-color: var(--border); }
+
+  #status { font-size: .85rem; min-height: 1.3rem; margin-bottom: .5rem; color: var(--ok); }
+
+  /* --- Layout: stacked by default (keys, editor, LED) --------------------- */
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "keys" "editor" "led";
+    gap: 1rem;
+    align-items: start;
+  }
+  #keysCard { grid-area: keys; }
+  #editor   { grid-area: editor; }
+  #ledCard  { grid-area: led; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); padding: 1rem 1.1rem; }
+
+  #tabs { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-bottom: .75rem; }
+  .tab { border-radius: 999px; padding: .3rem .85rem; font-size: .88rem; display: inline-flex; align-items: center; gap: .45rem; }
+  .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .sw { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; box-shadow: 0 0 0 1.5px rgba(255,255,255,.7), 0 0 0 2.5px rgba(0,0,0,.15); }
+
+  /* --- Compact key tiles -------------------------------------------------- */
+  #grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .key {
+    position: relative; aspect-ratio: 2.1; min-width: 0; padding: .35rem .5rem; border-radius: 12px; cursor: pointer;
+    background: var(--key); border: 1px solid var(--border); border-bottom-width: 3px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+    transition: border-color .15s, background .15s, transform .08s;
+    overflow: hidden; touch-action: manipulation;
+  }
+  .key:hover { border-color: var(--accent); }
+  .key:active { transform: translateY(2px); border-bottom-width: 1px; }
+  .key.sel { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .key .num { position: absolute; top: 4px; left: 7px; font-size: .65rem; color: var(--muted); font-weight: 600; }
+  .key .lbl { font-weight: 600; font-size: .85rem; line-height: 1.15; word-break: break-word; max-height: 2.4em; overflow: hidden; }
+  .key .lbl.empty { color: var(--muted); font-weight: 400; font-style: italic; }
+  .key .sq { font: .65rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); margin-top: 2px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* --- LED card ----------------------------------------------------------- */
+  #ledCard h3 { margin: 0 0 .1rem; font-size: .95rem; display: flex; align-items: center; gap: .5rem; }
+  #ledCard h3 .sw { width: 14px; height: 14px; }
+  .led-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 1rem; }
+  #ledCard label { display: flex; justify-content: space-between; margin-top: .55rem; }
+  #ledCard label b { font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; height: 10px; border-radius: 999px; appearance: none; -webkit-appearance: none; outline: none; cursor: pointer; margin: .3rem 0; touch-action: pan-y; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 2px solid var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+  input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 2px solid var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+  #hue { background: linear-gradient(90deg, hsl(0,100%,50%), hsl(60,100%,50%), hsl(120,100%,50%), hsl(180,100%,50%), hsl(240,100%,50%), hsl(300,100%,50%), hsl(360,100%,50%)); }
+  #bri, #strip { background: var(--border); }
+  .hint { font-size: .75rem; color: var(--muted); margin: .4rem 0 0; }
+
+  /* --- Compact RGB readout ------------------------------------------------ */
+  .rgbline { display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; margin-top: .6rem; font-size: .82rem; }
+  .rgbline span.item { display: inline-flex; align-items: center; gap: .4rem; }
+  .rgbline .sw { width: 14px; height: 14px; border-radius: 4px; }
+  .rgbline em { font-style: normal; color: var(--muted); }
+  .rgbline code { font: .82rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  /* --- Editor card -------------------------------------------------------- */
+  #editor h3 { margin: 0 0 .5rem; font-size: 1rem; }
+  label { display: block; margin: .7rem 0 .3rem; font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  label small { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  input[type=text], input[type=number] {
+    width: 100%; padding: .55rem .8rem; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font: inherit; outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input[type=text]:focus, input[type=number]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  #seq { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .recbar { display: flex; align-items: center; gap: .5rem; margin-top: .6rem; flex-wrap: wrap; }
+  #rec.on { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); display: none; }
+  #editor.recording .dot { display: inline-block; animation: pulse 1s infinite; }
+  #editor.recording { border-color: var(--danger); }
+  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.8); } }
+  #recHint { font-size: .85rem; color: var(--danger); }
+
+  .mods { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .6rem; align-items: center; }
+  .mods button { padding: .3rem .75rem; font-size: .85rem; }
+  .mods button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* --- Delay row ---------------------------------------------------------- */
+  .delay { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .6rem; align-items: center; }
+  .delay .dl { font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-right: .2rem; }
+  .delay button { padding: .3rem .7rem; font-size: .85rem; }
+  .delay input[type=number] { width: 5.5rem; padding: .3rem .5rem; font-size: .85rem; border-radius: 8px; }
+  .delay .unit { font-size: .85rem; color: var(--muted); }
+
+  #chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: .7rem; min-height: 1.8rem; }
+  .chip { font: .8rem ui-monospace, SFMono-Regular, Menlo, monospace; padding: .2rem .6rem; border-radius: 8px; background: var(--accent-soft); color: var(--accent); border: 1px solid transparent; }
+  /* Wait chips: solid white fill (lighter grey in dark mode) with a little extra padding */
+  .chip.wait { background: var(--wait-bg); border-color: var(--border); color: var(--muted); padding: .2rem .8rem; }
+  .chip.bad { background: transparent; border-color: var(--danger); color: var(--danger); }
+  .err { color: var(--danger); font-size: .85rem; min-height: 1.2rem; margin-top: .3rem; }
+
+  /* --- Landscape / wide: keys + LED on the left, editor on the right ------ */
+  @media (orientation: landscape) and (min-width: 700px) {
+    .wrap { max-width: 1200px; padding-top: 1rem; }
+    .layout {
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+      grid-template-areas: "keys editor" "led editor";
+      grid-template-rows: auto 1fr;
+    }
+    #editor { position: sticky; top: 1rem; align-self: start; }
+  }
+
+  /* --- Landscape on short screens (phones turned sideways) ---------------- */
+  @media (orientation: landscape) and (max-height: 520px) {
+    .wrap { padding-top: .5rem; padding-bottom: 1rem; }
+    header { margin-bottom: .5rem; }
+    h1 { font-size: 1.15rem; }
+    #status { margin-bottom: .25rem; min-height: 1rem; }
+    .card { padding: .7rem .85rem; border-radius: 14px; }
+    #tabs { margin-bottom: .5rem; }
+    #grid { gap: 6px; }
+    .key { aspect-ratio: 2.6; padding: .2rem .4rem; }
+    .key .sq { display: none; }
+    #editor { position: static; }
+    label { margin-top: .4rem; }
+    #ledCard label { margin-top: .3rem; }
+    .hint { display: none; }
+  }
+
+  /* --- Narrow portrait (phones) ------------------------------------------- */
+  @media (max-width: 520px) {
+    .wrap { padding-top: .75rem; }
+    .toolbar { width: 100%; }
+    .toolbar .primary { flex: 1 1 auto; }
+    .card { padding: .85rem; }
+    .key { aspect-ratio: 1.7; padding: .3rem; }
+    .key .lbl { font-size: .8rem; }
+    input[type=text], input[type=number] { font-size: 16px; }
+    button { padding: .55rem 1rem; }
+    .mods button, .delay button { padding: .3rem .75rem; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>MacroPad <span>Editor</span></h1>
+    <div class="toolbar">
+      <button id="connect" class="primary">Connect CIRCUITPY</button>
+      <button id="save" disabled>Save to device</button>
+      <button id="dl" class="ghost">Download</button>
+      <button id="ulBtn" class="ghost">Upload</button>
+      <input type="file" id="ul" accept=".json" hidden>
+    </div>
+  </header>
+
+  <div id="status"></div>
+
+  <div class="layout">
+    <div class="card" id="keysCard">
+      <div id="tabs"></div>
+      <div id="grid"></div>
+    </div>
+
+    <div class="card" id="editor" hidden>
+      <h3 id="edTitle">Key 1</h3>
+      <label>Label</label>
+      <input type="text" id="label" placeholder="e.g. Manage polygons">
+
+      <label>Sequence <small>— e.g. <code>T G M</code>, <code>LCTL+LALT+C</code>, <code>LCTL+A wait20 LCTL+C</code> (lower case is converted to upper case)</small></label>
+      <input type="text" id="seq" placeholder="Click Record and press your shortcut" autocapitalize="characters" spellcheck="false">
+
+      <div class="recbar">
+        <span class="dot"></span>
+        <button id="rec">● Record</button>
+        <button id="undo" class="ghost">⌫ Undo last</button>
+        <button id="clr" class="ghost">Clear</button>
+        <span id="recHint"></span>
+      </div>
+
+      <div class="mods" id="mods">
+        <button data-mod="LGUI">Win</button>
+        <button data-mod="LCTL">Ctrl</button>
+        <button data-mod="LALT">Alt</button>
+        <button data-mod="LSFT">Shift</button>
+        <button id="full" class="ghost">⛶ Capture all keys</button>
+      </div>
+
+      <div class="delay" id="delay">
+        <span class="dl">Delay</span>
+        <button data-ms="20">20</button>
+        <button data-ms="50">50</button>
+        <button data-ms="100">100</button>
+        <button data-ms="250">250</button>
+        <button data-ms="500">500</button>
+        <input type="number" id="ms" min="1" max="5000" step="10" value="100" aria-label="Custom delay in milliseconds">
+        <span class="unit">ms</span>
+        <button id="addWait">+ Add delay</button>
+      </div>
+
+      <div id="chips"></div>
+      <div id="err" class="err"></div>
+    </div>
+
+    <div class="card" id="ledCard">
+      <h3><span class="sw" id="ledSw"></span> LED for <span id="ledName"></span></h3>
+      <div class="led-grid">
+        <div>
+          <label for="hue">Colour <b id="hueVal"></b></label>
+          <input type="range" id="hue" min="0" max="255">
+        </div>
+        <div>
+          <label for="bri">Brightness <b id="briVal"></b></label>
+          <input type="range" id="bri" min="0" max="255">
+        </div>
+        <div>
+          <label for="strip">Key backlight (all layers) <b id="stripVal"></b></label>
+          <input type="range" id="strip" min="0" max="255">
+        </div>
+      </div>
+
+      <div class="rgbline">
+        <span class="item"><span class="sw" id="roLedSw"></span><em>LED</em><code id="roLed"></code></span>
+        <span class="item"><span class="sw" id="roStripSw"></span><em>Backlight</em><code id="roStrip"></code></span>
+      </div>
+
+      <p class="hint">Colour applies to the onboard LED and the key backlight of this layer. The backlight is kept dim on purpose (default 20).</p>
+    </div>
+  </div>
+</div>
+
+<script>
+let dirHandle = null;
+let state = { strip_brightness: 20, layers: [{ name: "Layer 1", keys: [] }] };
+let li = 0, ki = 0;
+let dirty = false;   // true while there are changes that are not saved to the device
+
+const DEFAULT_HUES = [85, 170, 0, 128, 21, 200, 42, 225];   // same as layers.py
+const DEFAULT_BRIGHTNESS = 180;
+
+const $ = id => document.getElementById(id);
+const status = (m, bad) => { $("status").textContent = m; $("status").style.color = bad ? "var(--danger)" : "var(--ok)"; };
+
+// Called on every edit: replaces the old "Saved" message with a warning.
+function markDirty() {
+  dirty = true;
+  $("status").textContent = "● Unsaved changes";
+  $("status").style.color = "var(--warn)";
+}
+// Called after a successful save or after loading data.
+function markClean() { dirty = false; }
+
+window.addEventListener("beforeunload", e => {
+  if (dirty) { e.preventDefault(); e.returnValue = ""; }
+});
+
+const TOKEN = /^(wait\d+|[A-Z0-9_]+(\+[A-Z0-9_]+)*)$/;
+const validate = s => s.trim().split(/\s+/).filter(Boolean).find(t => !TOKEN.test(t));
+const esc = s => (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// Upper-cases every token except delays, which must stay "waitNN".
+// Whitespace is kept as typed, so the text cursor does not jump while typing.
+const fixCase = s => String(s || "").split(/(\s+)/).map(t =>
+  /^wait\d+$/i.test(t) ? t.toLowerCase() : t.toUpperCase()).join("");
+
+// Hue 0-255 (KMK scale) -> CSS colour. Brightness only nudges lightness so
+// the preview stays visible even at low values (used for tab dots / title dot).
+const ledCss = (hue, bri) => `hsl(${(hue / 255 * 360).toFixed(0)}, 100%, ${(15 + bri / 255 * 40).toFixed(0)}%)`;
+
+// --- RGB output --------------------------------------------------------------
+// The pad calls hsv_to_rgb(hue, 255, value) with all three on a 0-255 scale.
+function hsvToRgb(h255, s255, v255) {
+  const h = (h255 / 255) * 6, s = s255 / 255, v = v255 / 255;
+  const i = Math.floor(h) % 6, f = h - Math.floor(h);
+  const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+  const [r, g, b] = [[v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]][i];
+  return [r, g, b].map(x => Math.round(x * 255));
+}
+const rgbText = (hue, val) => `rgb(${hsvToRgb(hue, 255, val).join(", ")})`;
+const rgbCss = (hue, val) => `rgb(${hsvToRgb(hue, 255, val).join(",")})`;
+
+function updateReadout() {
+  const l = state.layers[li];
+  $("roLed").textContent = rgbText(l.hue, l.brightness);
+  $("roStrip").textContent = rgbText(l.hue, state.strip_brightness);
+  $("roLedSw").style.background = rgbCss(l.hue, l.brightness);
+  $("roStripSw").style.background = rgbCss(l.hue, state.strip_brightness);
+}
+
+function normalize() {
+  if (typeof state.strip_brightness !== "number") state.strip_brightness = 20;
+  state.layers.forEach((l, i) => {
+    l.keys = l.keys || [];
+    while (l.keys.length < 9) l.keys.push({ label: "", seq: "" });
+    l.keys.forEach(k => { k.seq = fixCase(k.seq); });   // old files may contain lower case
+    if (typeof l.hue !== "number") l.hue = DEFAULT_HUES[i % DEFAULT_HUES.length];
+    if (typeof l.brightness !== "number") l.brightness = DEFAULT_BRIGHTNESS;
+  });
+}
+
+const cellHTML = (k, i) =>
+  `<span class="num">${i + 1}</span>` +
+  `<span class="lbl${k.label ? "" : " empty"}">${esc(k.label) || "empty"}</span>` +
+  `<span class="sq">${esc(k.seq)}</span>`;
+
+function renderChips() {
+  const seq = $("seq").value.trim();
+  $("chips").innerHTML = seq
+    ? seq.split(/\s+/).map(t =>
+        `<span class="chip${!TOKEN.test(t) ? " bad" : t.startsWith("wait") ? " wait" : ""}">${esc(t)}</span>`).join("")
+    : "";
+}
+
+function selectKey(i) {
+  ki = i;
+  render();
+  setRecording(true);
+  $("editor").scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function render() {
+  setRecording(false);
+  normalize();
+  $("tabs").innerHTML = "";
+  state.layers.forEach((l, i) => {
+    const b = document.createElement("button");
+    b.innerHTML = `<span class="sw" style="background:${ledCss(l.hue, l.brightness)}"></span>${i}: ${esc(l.name)}`;
+    b.className = "tab" + (i === li ? " active" : "");
+    b.onclick = () => { li = i; ki = 0; render(); };
+    $("tabs").appendChild(b);
+  });
+  const mk = (text, fn) => {
+    const b = document.createElement("button");
+    b.textContent = text; b.className = "ghost"; b.onclick = fn;
+    $("tabs").appendChild(b);
+  };
+  mk("+ layer", () => { state.layers.push({ name: "Layer " + (state.layers.length + 1), keys: [] }); li = state.layers.length - 1; ki = 0; render(); markDirty(); });
+  mk("rename", () => { const n = prompt("Layer name", state.layers[li].name); if (n) { state.layers[li].name = n; render(); markDirty(); } });
+  if (state.layers.length > 1)
+    mk("delete", () => { if (confirm("Delete this layer?")) { state.layers.splice(li, 1); li = 0; ki = 0; render(); markDirty(); } });
+
+  $("grid").innerHTML = "";
+  state.layers[li].keys.slice(0, 9).forEach((k, i) => {
+    const d = document.createElement("div");
+    d.className = "key" + (i === ki ? " sel" : "");
+    d.innerHTML = cellHTML(k, i);
+    d.onclick = () => selectKey(i);
+    $("grid").appendChild(d);
+  });
+
+  const k = state.layers[li].keys[ki];
+  $("editor").hidden = false;
+  $("edTitle").textContent = `Key ${ki + 1}`;
+  $("label").value = k.label;
+  $("seq").value = k.seq;
+  checkErr();
+  renderLed();
+}
+
+// --- LED controls ---
+function renderLed() {
+  const l = state.layers[li];
+  $("ledName").textContent = l.name;
+  $("hue").value = l.hue;
+  $("bri").value = l.brightness;
+  $("strip").value = state.strip_brightness;
+  updateLedLabels();
+}
+
+function updateLedLabels() {
+  const l = state.layers[li];
+  $("hueVal").textContent = `${l.hue} (${Math.round(l.hue / 255 * 360)}°)`;
+  $("briVal").textContent = `${l.brightness} (${Math.round(l.brightness / 255 * 100)}%)`;
+  $("stripVal").textContent = `${state.strip_brightness} (${Math.round(state.strip_brightness / 255 * 100)}%)`;
+  const css = ledCss(l.hue, l.brightness);
+  $("ledSw").style.background = css;
+  const tabSw = $("tabs").children[li] && $("tabs").children[li].querySelector(".sw");
+  if (tabSw) tabSw.style.background = css;
+  updateReadout();
+}
+
+$("hue").oninput = e => { state.layers[li].hue = +e.target.value; updateLedLabels(); markDirty(); };
+$("bri").oninput = e => { state.layers[li].brightness = +e.target.value; updateLedLabels(); markDirty(); };
+$("strip").oninput = e => { state.strip_brightness = +e.target.value; updateLedLabels(); markDirty(); };
+// Arrow keys on a slider must not be captured by the recorder.
+["hue", "bri", "strip"].forEach(id => {
+  $(id).onfocus = () => setRecording(false);
+  $(id).onpointerdown = () => setRecording(false);
+});
+
+function checkErr() {
+  const bad = validate($("seq").value);
+  $("err").textContent = bad ? `Invalid token: "${bad}"` : "";
+  renderChips();
+  return !bad;
+}
+
+function refreshGridOnly() {
+  const cell = $("grid").children[ki], k = state.layers[li].keys[ki];
+  cell.innerHTML = cellHTML(k, ki);
+}
+
+$("label").oninput = e => { state.layers[li].keys[ki].label = e.target.value; refreshGridOnly(); markDirty(); };
+$("seq").oninput = e => {
+  // Convert to upper case right away; the length does not change, so the cursor stays put.
+  const el = e.target, fixed = fixCase(el.value);
+  if (fixed !== el.value) {
+    const a = el.selectionStart, b = el.selectionEnd;
+    el.value = fixed;
+    try { el.setSelectionRange(a, b); } catch {}
+  }
+  state.layers[li].keys[ki].seq = el.value;
+  checkErr(); refreshGridOnly(); markDirty();
+};
+$("label").onfocus = () => setRecording(false);
+$("seq").onfocus = () => setRecording(false);
+
+function allValid() {
+  for (const l of state.layers) for (const k of l.keys)
+    if (validate(k.seq)) { status(`Fix invalid sequence in "${l.name}": ${k.seq}`, true); return false; }
+  return true;
+}
+
+// --- Device access ---
+$("connect").onclick = async () => {
+  if (!window.showDirectoryPicker) return status("Use Chrome/Edge, or the JSON download/upload.", true);
+  try {
+    dirHandle = await showDirectoryPicker({ mode: "readwrite" });
+    try {
+      const f = await (await dirHandle.getFileHandle("macros.json")).getFile();
+      state = JSON.parse(await f.text());
+      status("Loaded macros.json");
+    } catch { status("No macros.json yet — it will be created on save."); }
+    li = 0; ki = 0; $("save").disabled = false; render();
+    markClean();
+  } catch (e) { status(e.message, true); }
+};
+
+$("save").onclick = async () => {
+  if (!allValid()) return;
+  try {
+    const fh = await dirHandle.getFileHandle("macros.json", { create: true });
+    const w = await fh.createWritable();
+    await w.write(JSON.stringify(state, null, 2));
+    await w.close();
+    markClean();
+    status("Saved — the pad reloads automatically.");
+  } catch (e) { status("Save failed: " + e.message, true); }
+};
+
+// --- Fallback: file download / upload ---
+$("dl").onclick = () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(state, null, 2)], { type: "application/json" }));
+  a.download = "macros.json"; a.click();
+};
+$("ulBtn").onclick = () => $("ul").click();
+$("ul").onchange = async e => {
+  try {
+    state = JSON.parse(await e.target.files[0].text());
+    li = 0; ki = 0; render();
+    markClean();
+    status("Loaded file");
+  }
+  catch { status("Invalid JSON", true); }
+};
+
+// --- Key recorder ---
+const CODE_MAP = {
+  Enter: "ENTER", Escape: "ESC", Backspace: "BSPC", Tab: "TAB", Space: "SPACE",
+  Minus: "MINS", Equal: "EQL", BracketLeft: "LBRC", BracketRight: "RBRC",
+  Backslash: "BSLS", Semicolon: "SCLN", Quote: "QUOT", Backquote: "GRV",
+  Comma: "COMM", Period: "DOT", Slash: "SLSH", IntlBackslash: "NUBS",
+  CapsLock: "CAPS", ArrowUp: "UP", ArrowDown: "DOWN", ArrowLeft: "LEFT", ArrowRight: "RGHT",
+  Home: "HOME", End: "END", PageUp: "PGUP", PageDown: "PGDN", Insert: "INS", Delete: "DEL",
+  PrintScreen: "PSCR", ScrollLock: "SLCK", Pause: "PAUS",
+  NumpadAdd: "PPLS", NumpadSubtract: "PMNS", NumpadMultiply: "PAST",
+  NumpadDivide: "PSLS", NumpadEnter: "PENT", NumpadDecimal: "PDOT",
+};
+const MOD_MAP = {
+  ControlLeft: "LCTL", ControlRight: "RCTL", ShiftLeft: "LSFT", ShiftRight: "RSFT",
+  AltLeft: "LALT", AltRight: "RALT", MetaLeft: "LGUI", MetaRight: "RGUI",
+};
+const MOD_ORDER = ["LCTL", "RCTL", "LSFT", "RSFT", "LALT", "RALT", "LGUI", "RGUI"];
+
+function codeToKmk(code) {
+  if (CODE_MAP[code]) return CODE_MAP[code];
+  let m;
+  if ((m = code.match(/^Key([A-Z])$/))) return m[1];
+  if ((m = code.match(/^Digit(\d)$/))) return "N" + m[1];
+  if ((m = code.match(/^F(\d{1,2})$/))) return "F" + m[1];
+  if ((m = code.match(/^Numpad(\d)$/))) return "P" + m[1];
+  return null;
+}
+
+// Modifier toggle buttons: click Win + Alt, then press P -> LGUI+LALT+P
+const sticky = new Set();
+function updateMods() {
+  document.querySelectorAll("#mods [data-mod]").forEach(b =>
+    b.classList.toggle("on", sticky.has(b.dataset.mod)));
+}
+document.querySelectorAll("#mods [data-mod]").forEach(b => {
+  b.onmousedown = e => e.preventDefault();   // keep focus off the button
+  b.onclick = () => {
+    if (!recording) setRecording(true);      // starts recording and clears toggles
+    const m = b.dataset.mod;
+    sticky.has(m) ? sticky.delete(m) : sticky.add(m);
+    updateMods();
+  };
+});
+
+let recording = false, held = new Set(), modPending = false;
+
+// Appending dispatches an "input" event, which also calls markDirty().
+function appendToken(tok) {
+  const seq = $("seq");
+  seq.value = (seq.value.trim() + " " + tok).trim();
+  seq.dispatchEvent(new Event("input"));
+}
+
+// --- Delays: appends "waitNN" to the sequence ---
+function addWait(ms) {
+  ms = Math.round(Number(ms));
+  if (!Number.isFinite(ms) || ms < 1 || ms > 5000) {
+    return status("Delay must be between 1 and 5000 ms.", true);
+  }
+  appendToken("wait" + ms);
+}
+document.querySelectorAll("#delay [data-ms]").forEach(b => {
+  b.onmousedown = e => e.preventDefault();   // keep recording focus state
+  b.onclick = () => addWait(b.dataset.ms);
+});
+$("addWait").onmousedown = e => e.preventDefault();
+$("addWait").onclick = () => addWait($("ms").value);
+// Typing a number must not be captured by the recorder.
+$("ms").onfocus = () => setRecording(false);
+$("ms").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); addWait($("ms").value); } };
+
+function onRecKeyDown(e) {
+  e.preventDefault(); e.stopPropagation();
+  if (e.repeat) return;
+  if (MOD_MAP[e.code]) { held.add(MOD_MAP[e.code]); modPending = true; return; }
+  const key = codeToKmk(e.code);
+  if (!key) { $("recHint").textContent = `Unsupported key: ${e.code}`; return; }
+  $("recHint").textContent = "Recording… press your shortcut";
+  const mods = MOD_ORDER.filter(m => held.has(m) || sticky.has(m));
+  appendToken([...mods, key].join("+"));
+  sticky.clear(); updateMods();
+  modPending = false;
+}
+
+function onRecKeyUp(e) {
+  e.preventDefault(); e.stopPropagation();
+  const mod = MOD_MAP[e.code];
+  if (!mod) return;
+  // Modifier pressed and released alone (e.g. just the Windows key)
+  if (modPending && held.size === 1) appendToken(mod);
+  modPending = false;
+  held.delete(mod);
+}
+
+function setRecording(on) {
+  if (on && document.activeElement) document.activeElement.blur();
+  window.removeEventListener("keydown", onRecKeyDown, true);
+  window.removeEventListener("keyup", onRecKeyUp, true);
+  recording = on;
+  held.clear(); modPending = false;
+  sticky.clear(); updateMods();
+  $("rec").textContent = on ? "■ Stop" : "● Record";
+  $("rec").classList.toggle("on", on);
+  $("editor").classList.toggle("recording", on);
+  $("recHint").textContent = on ? "Recording… press your shortcut" : "";
+  if (on) {
+    window.addEventListener("keydown", onRecKeyDown, true);
+    window.addEventListener("keyup", onRecKeyUp, true);
+  }
+}
+
+$("rec").onclick = () => setRecording(!recording);
+$("clr").onclick = () => { $("seq").value = ""; $("seq").dispatchEvent(new Event("input")); };
+$("undo").onclick = () => {
+  const t = $("seq").value.trim().split(/\s+/).filter(Boolean);
+  t.pop();
+  $("seq").value = t.join(" ");
+  $("seq").dispatchEvent(new Event("input"));
+};
+
+// Keyboard Lock: lets the page receive Win+… combos (needs fullscreen)
+$("full").onmousedown = e => e.preventDefault();
+$("full").onclick = async () => {
+  if (!navigator.keyboard || !navigator.keyboard.lock)
+    return status("Keyboard lock needs Chrome or Edge.", true);
+  try {
+    if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+    await navigator.keyboard.lock();
+    if (!recording) setRecording(true);
+    status("All keys captured. Hold Esc to leave fullscreen.");
+  } catch (e) { status(e.message, true); }
+};
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && navigator.keyboard) navigator.keyboard.unlock();
+});
+
+render();
+</script>
+</html>
